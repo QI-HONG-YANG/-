@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>隨機詞彙轉盤</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap');
+        
+        body {
+            font-family: 'Noto Sans TC', sans-serif;
+            background-color: #f3f4f6; /* bg-gray-100 */
+        }
+
+        /* 轉盤容器與動畫相關樣式 */
+        .wheel-container {
+            position: relative;
+            width: 300px;
+            height: 300px;
+            margin: 0 auto;
+            border-radius: 50%;
+            border: 8px solid #fff;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1), 0 10px 15px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+            background-color: #e5e7eb; /* 預設背景色 */
+        }
+
+        /* 轉盤本體，用於旋轉 */
+        .wheel {
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            position: relative;
+            transition: transform 3s cubic-bezier(0.25, 0.1, 0.25, 1); /* 平滑減速動畫 */
+            transform: rotate(0deg);
+        }
+
+        /* 轉盤上的區塊 (使用 clip-path 繪製扇形) */
+        .wheel-segment {
+            position: absolute;
+            top: 0;
+            left: 50%;
+            width: 100%;
+            height: 100%;
+            transform-origin: 0 50%; /* 依左邊緣中心旋轉 */
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            padding-right: 20px; /* 文字距離邊緣的距離 */
+            box-sizing: border-box;
+            color: white;
+            font-weight: bold;
+            font-size: 14px;
+            /* clip-path 將在 JS 中動態設定以形成正確的扇形角度 */
+        }
+
+        /* 轉盤中央的指針/裝飾 */
+        .wheel-center {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 40px;
+            height: 40px;
+            background-color: #fff;
+            border-radius: 50%;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            z-index: 10;
+        }
+
+        /* 指針 (位於轉盤頂部外側) */
+        .pointer {
+            position: absolute;
+            top: -15px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 0;
+            height: 0;
+            border-left: 15px solid transparent;
+            border-right: 15px solid transparent;
+            border-top: 30px solid #ef4444; /* red-500 */
+            z-index: 20;
+            filter: drop-shadow(0 2px 2px rgba(0,0,0,0.3));
+        }
+        
+        /* 隱藏卷軸但允許滾動 */
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+    </style>
+</head>
+<body class="text-gray-800 min-h-screen flex flex-col items-center justify-center p-4 md:p-8">
+
+    <div class="max-w-6xl w-full grid grid-cols-1 md:grid-cols-3 gap-8">
+        
+        <!-- 左側：輸入區 -->
+        <div class="bg-white rounded-xl shadow-lg p-6 flex flex-col h-[600px]">
+            <h2 class="text-xl font-bold mb-4 text-indigo-600 border-b pb-2">輸入詞彙</h2>
+            <p class="text-sm text-gray-500 mb-2">每行輸入一個詞彙：</p>
+            <textarea id="wordInput" class="flex-grow w-full border border-gray-300 rounded-lg p-3 resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500 no-scrollbar mb-4" placeholder="例如：
+蘋果
+香蕉
+橘子
+西瓜"></textarea>
+            
+            <div class="flex gap-2">
+                <button id="updateWheelBtn" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors">
+                    更新轉盤
+                </button>
+                <button id="clearInputBtn" class="bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold py-2 px-4 rounded-lg transition-colors">
+                    清空
+                </button>
+            </div>
+            
+            <div class="mt-4 text-sm text-gray-600 flex justify-between items-center">
+                <span>當前詞彙數：<span id="currentWordCount" class="font-bold text-indigo-600">0</span></span>
+            </div>
+        </div>
+
+        <!-- 中間：轉盤區 -->
+        <div class="bg-white rounded-xl shadow-lg p-6 flex flex-col items-center justify-center h-[600px] relative">
+            <h2 class="text-xl font-bold mb-8 text-indigo-600 w-full text-center absolute top-6">幸運轉盤</h2>
+            
+            <div class="relative w-full flex justify-center mt-8">
+                <div class="pointer"></div>
+                <div class="wheel-container" id="wheelContainer">
+                    <div class="wheel" id="wheel">
+                        <!-- 轉盤扇形將由 JS 動態生成 -->
+                    </div>
+                    <div class="wheel-center"></div>
+                </div>
+            </div>
+
+            <button id="spinBtn" class="mt-12 bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-12 rounded-full shadow-lg transform transition hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed text-lg">
+                開始抽取！
+            </button>
+            
+            <!-- 顯示抽中結果的彈出框 (預設隱藏) -->
+            <div id="resultModal" class="absolute inset-0 bg-white/90 backdrop-blur-sm z-30 hidden flex-col items-center justify-center rounded-xl">
+                <h3 class="text-2xl font-bold text-gray-800 mb-2">抽中囉！</h3>
+                <p id="resultText" class="text-4xl font-extrabold text-indigo-600 mb-8 animate-bounce"></p>
+                <div class="flex gap-4">
+                     <button id="keepResultBtn" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold py-2 px-6 rounded-lg transition-colors">
+                        保留在轉盤
+                    </button>
+                    <button id="removeResultBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-6 rounded-lg transition-colors shadow-md">
+                        排除此詞彙
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 右側：已抽出/排除區 -->
+        <div class="bg-white rounded-xl shadow-lg p-6 flex flex-col h-[600px]">
+            <div class="flex justify-between items-center border-b pb-2 mb-4">
+                <h2 class="text-xl font-bold text-indigo-600">已抽出詞彙</h2>
+                <span class="text-sm bg-indigo-100 text-indigo-800 py-1 px-2 rounded-full font-semibold"><span id="extractedCount">0</span> 個</span>
+            </div>
+            
+            <div id="extractedList" class="flex-grow overflow-y-auto no-scrollbar space-y-2">
+                <!-- 已抽出的項目將顯示在這裡 -->
+                <div class="text-center text-gray-400 mt-10 italic" id="emptyExtractedMsg">尚未抽出任何詞彙</div>
+            </div>
+            
+            <button id="restoreAllBtn" class="mt-4 w-full bg-orange-500 hover:bg-orange-600 text-white font-semibold py-2 px-4 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                將全部放回轉盤
+            </button>
+        </div>
+
+    </div>
+
+    <script>
+        // --- 狀態管理 ---
+        let words = []; // 當前轉盤上的詞彙
+        let extractedWords = []; // 已抽出的詞彙
+        let isSpinning = false;
+        let currentRotation = 0; // 追蹤當前旋轉角度
+
+        // 預設顏色陣列 (可擴充)
+        const colors = [
+            '#ef4444', '#f97316', '#f59e0b', '#84cc16', '#22c55e', 
+            '#10b981', '#06b6d4', '#0ea5e9', '#3b82f6', '#6366f1', 
+            '#8b5cf6', '#a855f7', '#d946ef', '#ec4899', '#f43f5e'
+        ];
+
+        // --- DOM 元素 ---
+        const wordInput = document.getElementById('wordInput');
+        const updateWheelBtn = document.getElementById('updateWheelBtn');
+        const clearInputBtn = document.getElementById('clearInputBtn');
+        const currentWordCount = document.getElementById('currentWordCount');
+        
+        const wheelContainer = document.getElementById('wheelContainer');
+        const wheel = document.getElementById('wheel');
+        const spinBtn = document.getElementById('spinBtn');
+        
+        const resultModal = document.getElementById('resultModal');
+        const resultText = document.getElementById('resultText');
+        const removeResultBtn = document.getElementById('removeResultBtn');
+        const keepResultBtn = document.getElementById('keepResultBtn');
+        
+        const extractedList = document.getElementById('extractedList');
+        const extractedCount = document.getElementById('extractedCount');
+        const emptyExtractedMsg = document.getElementById('emptyExtractedMsg');
+        const restoreAllBtn = document.getElementById('restoreAllBtn');
+
+        let pendingResult = null; // 暫存抽中但尚未決定去留的詞彙和索引
+
+        // --- 初始化與轉盤繪製 ---
+
+        // 根據 textarea 內容更新 words 陣列
+        function parseInput() {
+            const rawText = wordInput.value;
+            // 按換行符號分割，去除前後空白，並過濾掉空字串
+            words = rawText.split('\n')
+                           .map(w => w.trim())
+                           .filter(w => w.length > 0);
+            
+            updateWordCount();
+            drawWheel();
+        }
+
+        function updateWordCount() {
+            currentWordCount.innerText = words.length;
+            spinBtn.disabled = words.length === 0;
+            if(words.length === 0) {
+                wheelContainer.style.backgroundColor = '#e5e7eb'; // 沒資料時變灰
+            }
+        }
+
+        // 繪製轉盤
+        function drawWheel() {
+            wheel.innerHTML = ''; // 清空現有扇形
+            
+            const numSegments = words.length;
+            
+            if (numSegments === 0) {
+                return;
+            }
+
+            if (numSegments === 1) {
+                // 只有一個詞彙時，畫滿整個圓
+                const segment = document.createElement('div');
+                segment.className = 'absolute inset-0 flex items-center justify-center text-white font-bold text-xl';
+                segment.style.backgroundColor = colors[0];
+                segment.innerText = words[0];
+                wheel.appendChild(segment);
+                return;
+            }
+
+            const anglePerSegment = 360 / numSegments;
+
+            words.forEach((word, index) => {
+                const segment = document.createElement('div');
+                segment.className = 'wheel-segment';
+                
+                // 設定顏色 (循環使用 colors 陣列)
+                const color = colors[index % colors.length];
+                
+                // 每個扇形的旋轉角度
+                const rotation = index * anglePerSegment;
+                
+                // 為了讓文字置中於扇形，調整文字旋轉角度
+                // 扇形起始點是左邊水平線(0度)，往順時針畫
+                segment.style.transform = `rotate(${rotation}deg)`;
+
+                // 使用 conic-gradient 來繪製單一扇形的背景
+                // 讓背景色只佔據該扇形的角度，其餘透明
+                // 注意：這裡將扇形起始點從中間開始畫，方便文字置中
+                segment.style.background = `conic-gradient(from -${anglePerSegment/2}deg at 50% 50%, ${color} 0deg, ${color} ${anglePerSegment}deg, transparent ${anglePerSegment}deg, transparent 360deg)`;
+                
+                // 限制文字長度避免超出轉盤
+                let displayText = word;
+                if(displayText.length > 8) {
+                    displayText = displayText.substring(0, 7) + '...';
+                }
+                
+                // 建立文字容器並定位到扇形右側邊緣
+                const textContainer = document.createElement('div');
+                textContainer.innerText = displayText;
+                // 因為 div 已經旋轉了，所以文字會在正確的方向。
+                // 將文字推到右側，並確保它在扇形範圍內
+                textContainer.style.position = 'absolute';
+                textContainer.style.right = '20px';
+                textContainer.style.transformOrigin = 'right center';
+                
+                // 調整文字大小以適應數量
+                if(numSegments > 20) textContainer.style.fontSize = '10px';
+                else if(numSegments > 10) textContainer.style.fontSize = '12px';
+
+                segment.appendChild(textContainer);
+                wheel.appendChild(segment);
+            });
+        }
+
+        // --- 旋轉邏輯 ---
+        function spin() {
+            if (isSpinning || words.length === 0) return;
+            
+            isSpinning = true;
+            spinBtn.disabled = true;
+            spinBtn.innerText = '旋轉中...';
+
+            // 決定要旋轉的圈數 (3-5圈) + 隨機角度
+            const extraSpins = (Math.floor(Math.random() * 3) + 3) * 360; 
+            const randomAngle = Math.floor(Math.random() * 360);
+            
+            // 計算最終角度 (累加之前的角度，確保一直是往前轉)
+            currentRotation += extraSpins + randomAngle;
+            
+            // 應用動畫
+            wheel.style.transform = `rotate(${currentRotation}deg)`;
+
+            // 計算抽中哪個索引
+            // 轉盤是順時針轉，但指針在上方(對應到原始的 -90度 或 270度 位置)
+            // 需要仔細計算目前指針指著哪個區塊
+            
+            const numSegments = words.length;
+            const anglePerSegment = 360 / numSegments;
+            
+            // normalize 最終角度到 0-360
+            const normalizedRotation = currentRotation % 360;
+            
+            // 指針固定在頂部 (相當於相對轉盤本體往逆時針轉了 normalizedRotation 度)
+            // 頂部初始是 -90度。
+            // 計算公式：
+            // 1. 找出轉盤轉動後，原本 0 度線相對於指針的位置
+            // 2. 由於我們的區塊是以 0 度為中心繪製 (利用 from -angle/2deg)
+            
+            // 更簡單的做法：計算出指針相對的虛擬角度
+            // 因為 CSS rotate 是順時針轉，轉了 R 度，相當於指針相對轉盤逆時針轉了 R 度。
+            // 指針在上方，是 270度(或-90度)。
+            // 指針相對轉盤的角度 = (360 - normalizedRotation + 270) % 360;
+            let pointerAngleOnWheel = (360 - normalizedRotation + 270) % 360;
+            
+            // 因為我們繪製扇形時，第 0 個扇形的中心在 0度 線上。
+            // 為了簡化，計算哪個扇形包含這個 pointerAngleOnWheel
+            // 將角度偏移半個扇形，方便除以 anglePerSegment 取整數
+            let offsetAngle = (pointerAngleOnWheel + anglePerSegment / 2) % 360;
+            let winningIndex = Math.floor(offsetAngle / anglePerSegment);
+
+            // 處理小數誤差或邊界情況
+            if(winningIndex >= numSegments) winningIndex = 0;
+
+            // 等待動畫結束 (transition 設定為 3s)
+            setTimeout(() => {
+                showResult(winningIndex);
+            }, 3050); // 多等 50ms 確保動畫完全停止
+        }
+
+        // --- 結果與排除邏輯 ---
+        function showResult(index) {
+            isSpinning = false;
+            spinBtn.innerText = '開始抽取！';
+            spinBtn.disabled = false;
+
+            const winningWord = words[index];
+            pendingResult = { word: winningWord, index: index };
+            
+            resultText.innerText = winningWord;
+            resultModal.classList.remove('hidden');
+            resultModal.classList.add('flex');
+        }
+
+        function removeWord() {
+            if (!pendingResult) return;
+            
+            const { word, index } = pendingResult;
+            
+            // 1. 從 words 陣列中移除
+            words.splice(index, 1);
+            
+            // 2. 加入 extractedWords 陣列
+            extractedWords.push(word);
+            
+            // 3. 更新 textarea 的內容 (反映目前的 words)
+            wordInput.value = words.join('\n');
+            
+            // 4. 重新繪製轉盤並更新計數
+            updateWordCount();
+            drawWheel();
+            updateExtractedList();
+            
+            // 5. 關閉 Modal
+            closeResultModal();
+        }
+
+        function keepWord() {
+            // 不做任何變動，僅關閉 Modal
+            closeResultModal();
+        }
+
+        function closeResultModal() {
+            resultModal.classList.add('hidden');
+            resultModal.classList.remove('flex');
+            pendingResult = null;
+        }
+
+        // --- 已抽出列表邏輯 ---
+        function updateExtractedList() {
+            extractedCount.innerText = extractedWords.length;
+            
+            if (extractedWords.length === 0) {
+                emptyExtractedMsg.style.display = 'block';
+                extractedList.innerHTML = '';
+                extractedList.appendChild(emptyExtractedMsg);
+                restoreAllBtn.disabled = true;
+                return;
+            }
+            
+            emptyExtractedMsg.style.display = 'none';
+            extractedList.innerHTML = ''; // 清空列表
+            restoreAllBtn.disabled = false;
+
+            // 越晚抽出的顯示在越上面 (反轉陣列顯示)
+            [...extractedWords].reverse().forEach((word, reversedIndex) => {
+                const originalIndex = extractedWords.length - 1 - reversedIndex;
+                
+                const itemDiv = document.createElement('div');
+                itemDiv.className = 'flex justify-between items-center bg-gray-50 p-3 rounded-lg border border-gray-100 shadow-sm';
+                
+                const textSpan = document.createElement('span');
+                textSpan.className = 'font-medium text-gray-700 break-all';
+                textSpan.innerText = word;
+                
+                const actionDiv = document.createElement('div');
+                actionDiv.className = 'flex gap-2 shrink-0 ml-2';
+
+                // 單獨放回按鈕
+                const restoreBtn = document.createElement('button');
+                restoreBtn.className = 'text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 py-1 px-2 rounded transition-colors';
+                restoreBtn.innerText = '放回';
+                restoreBtn.onclick = () => restoreSingleWord(originalIndex);
+
+                // 單獨刪除按鈕 (徹底刪除)
+                const deleteBtn = document.createElement('button');
+                deleteBtn.className = 'text-xs bg-red-100 hover:bg-red-200 text-red-700 py-1 px-2 rounded transition-colors';
+                deleteBtn.innerText = '刪除';
+                deleteBtn.onclick = () => deleteExtractedWord(originalIndex);
+
+                actionDiv.appendChild(restoreBtn);
+                actionDiv.appendChild(deleteBtn);
+                
+                itemDiv.appendChild(textSpan);
+                itemDiv.appendChild(actionDiv);
+                
+                extractedList.appendChild(itemDiv);
+            });
+        }
+
+        function restoreSingleWord(index) {
+            const wordToRestore = extractedWords.splice(index, 1)[0];
+            
+            // 加回 words 陣列和 textarea
+            words.push(wordToRestore);
+            wordInput.value = words.join('\n');
+            
+            // 更新 UI
+            updateWordCount();
+            drawWheel();
+            updateExtractedList();
+        }
+
+        function deleteExtractedWord(index) {
+            extractedWords.splice(index, 1);
+            updateExtractedList();
+        }
+
+        function restoreAllWords() {
+            if (extractedWords.length === 0) return;
+            
+            // 將所有抽出的詞彙加回 words
+            words = words.concat(extractedWords);
+            wordInput.value = words.join('\n');
+            
+            // 清空已抽出陣列
+            extractedWords = [];
+            
+            // 更新 UI
+            updateWordCount();
+            drawWheel();
+            updateExtractedList();
+        }
+
+        // --- 事件監聽器綁定 ---
+        
+        updateWheelBtn.addEventListener('click', () => {
+            parseInput();
+            // 重置轉盤角度，為了視覺一致性
+            currentRotation = 0;
+            wheel.style.transition = 'none'; // 取消動畫以立即跳轉
+            wheel.style.transform = `rotate(0deg)`;
+            // 強制重繪
+            void wheel.offsetWidth;
+            wheel.style.transition = 'transform 3s cubic-bezier(0.25, 0.1, 0.25, 1)';
+        });
+
+        clearInputBtn.addEventListener('click', () => {
+            wordInput.value = '';
+            parseInput();
+        });
+
+        // 當使用者在 textarea 裡面直接修改時，不立即更新轉盤，需點擊更新按鈕
+        // 但可以選用 input 事件即時更新 (這裡選擇點擊按鈕更新效能較好)
+
+        spinBtn.addEventListener('click', spin);
+        
+        removeResultBtn.addEventListener('click', removeWord);
+        keepResultBtn.addEventListener('click', keepWord);
+        
+        restoreAllBtn.addEventListener('click', restoreAllWords);
+
+        // --- 初始設定 ---
+        // 解析預設的 textarea 內容並繪製初始轉盤
+        parseInput();
+
+    </script>
+</body>
+</html>
